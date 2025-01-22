@@ -110,7 +110,7 @@ int decompress_blob(FILE *file, unsigned char *blob_data, size_t blob_size) {
 
 /* Function to extract and display the contents from decompressed data */
 int extract_and_print_content(unsigned char *data, size_t size) {
-  char *content = strchr(char *)data, '\0');
+  char *content = strchr((char *)data, '\0');
   if (content == NULL) {
     fprintf(stderr, "Invalid blob format\n");
     return Z_DATA_ERROR;

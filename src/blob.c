@@ -25,7 +25,7 @@ void get_file_path(char *file_path, char *object_hash) {
 
 
 /* Function to decompress blob data from a file */
-int decompress_blob(FILE *file, unsigned char *blob_data, size_t blob_size) {
+int decompress_blob(FILE *file, unsigned char **blob_data, size_t *blob_size) {
   // Decompress the blob data from the file
   z_stream stream;
   int ret;
@@ -122,6 +122,11 @@ int extract_and_print_content(unsigned char *data, size_t size) {
 
 /* Function to display the contents of a blob object */
 int cat_file(char *file, char *path) {
+  FILE *file = fopen(path, "rb");
+  if (file == NULL) {
+    fprintf(stderr, "Failed to open file %s\n", path);
+    return Z_ERRNO;
+  }
   unsigned char decompressed_data;
   size_t decompressed_size;
   int ret;

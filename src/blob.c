@@ -54,7 +54,7 @@ int decompress_blob(FILE *file, unsigned char **blob_data, size_t *blob_size) {
   }
 
   /* Read the compressed data from the file and decompress it */
-  blob_size = 0;
+  *blob_size = 0;
   do {
     stream.avail_in = fread(in, 1, CHUNK, file);
     if (ferror(file)) {
@@ -69,7 +69,7 @@ int decompress_blob(FILE *file, unsigned char **blob_data, size_t *blob_size) {
 
     do {
       stream.avail_out = CHUNK;
-      stream.next_out = *blob_data + blob_size;
+      stream.next_out = *blob_data + *blob_size;
       ret = inflate(&stream, Z_NO_FLUSH);
       assert(ret != Z_STREAM_ERROR);
       switch (ret) {
@@ -83,7 +83,7 @@ int decompress_blob(FILE *file, unsigned char **blob_data, size_t *blob_size) {
       }
       have = CHUNK - stream.avail_out;
       blob_size += have;
-      if (blob_size >= output_capacity) {
+      if (*blob_size >= output_capacity) {
         output_capacity *= 2;
         *blob_data = realloc(*blob_data, output_capacity);
         if (*blob_data == NULL) {
@@ -122,8 +122,8 @@ int extract_and_print_content(unsigned char *data, size_t size) {
 
 /* Function to display the contents of a blob object */
 int cat_file(char *file, char *path) {
-  FILE *file = fopen(path, "rb");
-  if (file == NULL) {
+  FILE *f = fopen(path, "rb");
+  if (f == NULL) {
     fprintf(stderr, "Failed to open file %s\n", path);
     return Z_ERRNO;
   }
@@ -131,7 +131,7 @@ int cat_file(char *file, char *path) {
   size_t decompressed_size;
   int ret;
 
-  ret = decompress_blob(file, &decompressed_data, decompressed_size);
+  ret = decompress_blob(file, &decompressed_data, &decompressed_size);
   if (ret != Z_OK) {
     return ret;
   }
@@ -139,5 +139,7 @@ int cat_file(char *file, char *path) {
   ret = extract_and_print_content(decompressed_data, decompressed_size);
   free(decompressed_data);
   return ret;
+  fclose(f);
+  return 0;
   
 }

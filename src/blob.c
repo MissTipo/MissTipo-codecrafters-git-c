@@ -121,7 +121,7 @@ int extract_and_print_content(unsigned char *data, size_t size) {
 }
 
 /* Function to display the contents of a blob object */
-int cat_file(char *file, char *path) {
+int cat_file(char *fp, char *path) {
   FILE *f = fopen(path, "rb");
   if (f == NULL) {
     fprintf(stderr, "Failed to open file %s\n", path);
@@ -131,7 +131,7 @@ int cat_file(char *file, char *path) {
   size_t decompressed_size;
   int ret;
 
-  ret = decompress_blob(file, &decompressed_data, &decompressed_size);
+  ret = decompress_blob(fp, &decompressed_data, &decompressed_size);
   if (ret != Z_OK) {
     return ret;
   }

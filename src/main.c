@@ -41,7 +41,7 @@ int main(int argc, char *argv[]) {
         printf("Initialized git directory\n");
 
     }else if (strcmp(command, "cat_file") == 0) {
-        if (strcmp(argv[2], "-p") != 0) || (argv[4] == NULL) {
+        if (strcmp(argv[2], "-p") != 0 || argv[4] == NULL) {
             fprintf(stderr, "Usage: ./your_program.sh cat_file -p <object_hash>\n");
             return 1; 
         }
@@ -49,13 +49,13 @@ int main(int argc, char *argv[]) {
         char *path = malloc(sizeof(char) * (SHA_LEN + 2 + strlen(OBJ_DIR)));
         FILE *blob_file = NULL;
         
-        get_file_path(path, argv[3]);
+        get_file_path(*path, argv[3]);
         blob_file = fopen(path, "rb");
         if (blob_file == NULL) {
             fprintf(stderr, "Failed to open file %s: %s\n", path, strerror(errno));
             return 1;
         }
-        cat_file(blob_file, path);
+        cat_file(*blob_file, path);
         
         free(path);
         fclose(blob_file);

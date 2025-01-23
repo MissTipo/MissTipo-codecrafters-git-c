@@ -127,11 +127,11 @@ int cat_file(char *fp, char *path) {
     fprintf(stderr, "Failed to open file %s\n", path);
     return Z_ERRNO;
   }
-  unsigned char decompressed_data;
+  unsigned char *decompressed_data;
   size_t decompressed_size;
   int ret;
 
-  ret = decompress_blob(f, *decompressed_data, &decompressed_size);
+  ret = decompress_blob(f, &decompressed_data, &decompressed_size);
   if (ret != Z_OK) {
     return ret;
   }

@@ -20,7 +20,7 @@ void get_file_path(char *file_path, char *object_hash) {
 
   // Copy the first two characters of the object hash to the file
   strncpy(file, object_hash, strlen(object_hash));
-  sprintf(file_path, "%s/%.2s/%s", OBJ_DIR, object_hash, file + 2);
+  snprintf(file_path, "%s/%.2s/%s", OBJ_DIR, object_hash, file + 2);
 }
 
 

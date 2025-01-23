@@ -49,7 +49,7 @@ int main(int argc, char *argv[]) {
         char *path = malloc(sizeof(char) * (SHA_LEN + 2 + strlen(OBJ_DIR)));
         FILE *blob_file = NULL;
         
-        get_file_path(*path, argv[3]);
+        get_file_path(path, argv[3]);
         blob_file = fopen(path, "rb");
         if (blob_file == NULL) {
             fprintf(stderr, "Failed to open file %s: %s\n", path, strerror(errno));

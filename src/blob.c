@@ -131,13 +131,13 @@ int cat_file(char *fp, char *path) {
   size_t decompressed_size;
   int ret;
 
-  ret = decompress_blob(f, &*decompressed_data, &decompressed_size);
+  ret = decompress_blob(f, *decompressed_data, &decompressed_size);
   if (ret != Z_OK) {
     return ret;
   }
 
-  ret = extract_and_print_content(*decompressed_data, decompressed_size);
-  free(decompressed_data);
+  ret = extract_and_print_content(decompressed_data, decompressed_size);
+  free(*decompressed_data);
   return ret;
   fclose(f);
   return 0;

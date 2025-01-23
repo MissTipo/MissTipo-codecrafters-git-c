@@ -42,7 +42,7 @@ int main(int argc, char *argv[]) {
 
     }else if (strcmp(command, "cat-file") == 0) {
         if (strcmp(argv[2], "-p") != 0 || argv[4] == NULL) {
-            fprintf(stderr, "Usage: ./your_program.sh cat_file -p <object_hash>\n");
+            fprintf(stderr, "Usage: ./your_program.sh cat-file -p <object_hash>\n");
             return 1; 
         }
         

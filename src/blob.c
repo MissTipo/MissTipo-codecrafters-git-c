@@ -137,7 +137,7 @@ int cat_file(char *fp, char *path) {
   }
 
   ret = extract_and_print_content(decompressed_data, decompressed_size);
-  free(*decompressed_data);
+  free(decompressed_data);
   return ret;
   fclose(f);
   return 0;

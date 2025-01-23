@@ -41,7 +41,7 @@ int main(int argc, char *argv[]) {
         printf("Initialized git directory\n");
 
     }else if (strcmp(command, "cat-file") == 0) {
-        if (strcmp(argv[2], "-p") != 0 || argv[4] == NULL) {
+        if (argc < 4 || strcmp(argv[2], "-p") != 0) {
             fprintf(stderr, "Usage: ./your_program.sh cat-file -p <object_hash>\n");
             printf("Received arguments: argc = %d, argv[1] = %s, argv[2] = %s, argv[3] = %s\n", argc, argv[1], argv[2], argv[3]);
             return 1; 

@@ -55,7 +55,7 @@ int main(int argc, char *argv[]) {
             fprintf(stderr, "Failed to open file %s: %s\n", path, strerror(errno));
             return 1;
         }
-        cat_file(*blob_file, path);
+        cat_file(path, path);
         
         free(path);
         fclose(blob_file);

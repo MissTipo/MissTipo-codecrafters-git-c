@@ -24,7 +24,7 @@ int main(int argc, char *argv[]) {
         // Uncomment this block to pass the first stage
 
         if (mkdir(".git", 0755) == -1 || 
-            mkdir(".git/objects", 0755) == -1 || 
+            mkdir("OBJ_DIR", 0755) == -1 || 
             mkdir(".git/refs", 0755) == -1) {
             fprintf(stderr, "Failed to create directories: %s\n", strerror(errno));
             return 1;

@@ -111,26 +111,14 @@ int decompress_blob(FILE *file, unsigned char **blob_data, size_t *blob_size) {
 
 /* Function to extract and display the contents from decompressed data */
 int extract_and_print_content(unsigned char *data, size_t size) {
-  // Look for the null terminator after the "blob <size>" header
-  char *header_end = strchr((char *)data, '\0');
-  if (header_end == NULL) {
+  char *content = strchr((char *)data, '\0');
+  if (content == NULL) {
     fprintf(stderr, "Invalid blob format\n");
     return Z_DATA_ERROR;
   }
-
-  // The content starts after the header and the null terminator
-  char *content = header_end + 1;
-  size_t content_size = size - (content - (char *)data);
-  fwrite(content, 1, content_size, stdout);
+  content++; // Skip the null terminator to get the actual content
+  printf("%s", content);
   return Z_OK;
-  // char *content = strchr((char *)data, '\0');
-  // if (content == NULL) {
-  //   fprintf(stderr, "Invalid blob format\n");
-  //   return Z_DATA_ERROR;
-  // }
-  // content++; // Skip the null terminator to get the actual content
-  // printf("%s", content);
-  // return Z_OK;
 }
 
 /* Function to display the contents of a blob object */

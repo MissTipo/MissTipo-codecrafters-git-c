@@ -59,7 +59,7 @@ int main(int argc, char *argv[]) {
         
         free(path);
         fclose(blob_file);
-    } else if (strcmp(command, "hash-object") == 0) {
+    } else if (strcmp(command, "hash-object") == 0) { //the has-object command
         if (argc < 4 || strcmp(argv[2], "-w") != 0) {
             fprintf(stderr, "Usage: ./your_program.sh hash-object <filename>\n");
             return 1;

@@ -67,6 +67,33 @@ int main(int argc, char *argv[]) {
         
         return hash_object(argv[3], 1);
 
+    } else if (strcmp(command, "ls-tree") == 0) {
+        if (argc < 4 || strcmp(argv[2], "--name-only") != 0) {
+            fprintf(stderr, "Usage: ./your_program.sh ls-tree --name-only <object_hash>\n");
+            return 1;
+        }
+
+        // char *tree_sha = argv[3];
+        // char *path = malloc(sizeof(char) * (SHA_LEN + 2 + strlen(OBJ_DIR)));
+        //
+        // if (!path) {
+        //     fprintf(stderr, "Failed to allocate memory\n");
+        //     return 1;
+        // }
+        //
+        // get_file_path(path, tree_sha);
+        // FILE *tree_file = fopen(path, "rb");
+        // if (!tree_file) {
+        //     fprintf(stderr, "Failed to open file %s: %s\n", path, strerror(errno));
+        //     free(path);
+        //     return 1;
+        // }
+
+        ls_tree(argv[3], 1);
+        // ls_tree(tree_file, strcmp(argv[2], "--name-only") == 0);
+        // free(path);
+        // fclose(tree_file);
+
     } else {
         fprintf(stderr, "Unknown command %s\n", command);
         return 1;

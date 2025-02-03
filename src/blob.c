@@ -15,7 +15,7 @@
 
 void get_file_path(char *file_path, char *object_hash) {
   // Get the file path from the object hash
-  char file[SHA_LEN + 1];
+char file[SHA_LEN + 1];
   file[SHA_LEN] = '\0';
 
   // Copy the first two characters of the object hash to the file
@@ -233,5 +233,114 @@ int hash_object(char *filename, int write_flag) {
     fwrite(compressed_blob, 1, stream.total_out, object_file);
     fclose(object_file);
   }
+}
+
+/* Function to list the contents of a tree object using the ls-tree command
+* with --name-only option
+* The output is alphabetically sorted
+*/
+
+void die(const char *msg) {
+  perror(msg);
+  exit(1);
+}
+
+// Read and decompress the tree object
+
+void read_git_object(const char *hash, unsigned char **data, size_t *size) {
+  char path[256];
+  snprintf(path, sizeof(path), "%s/%.2s/%s", OBJ_DIR, hash, hash + 2);
+  
+  int fd = open(path, O_RDONLY);
+  if (fd < 0) {
+    die("open");
+  }
+  
+  struct stat st;
+  if (fstat(fd, &st) < 0) {
+    die("fstat");
+  }
+  
+  unsigned char *compressed = malloc(st.st_size);
+  if (!compressed) {
+    die("malloc");
+  }
+
+  if (read(fd, compressed, st.st_size) != st.st_size);
+  close(fd);
+
+  *data = malloc(BUFFER_SIZE);
+  if (!*data) {
+    die("malloc");
+  }
+
+  z_stream stream = {0};
+  stream.avail_in = st.st_size;
+  stream.next_in = compressed;
+  stream.avail_out = BUFFER_SIZE;
+  stream.next_out = *data;
+
+  if (inflateInit(&stream) != Z_OK) {
+    die("inflateInit");
+  }
+
+  if (inflate(&stream, Z_FINISH) != Z_STREAM_END) {
+    die("inflate");
+  }
+
+  *size = stream.total_out;
+  inflateEnd(&stream);
+  free(compressed);
+
+}
+
+// Parse the tree object format
+
+void parse_tree(const unsigned char *data, size_t size, int name_only){
+  const unsigned char *ptr = data;
+  while (ptr < data + size) {
+    char mode[7];
+    char name[256];
+    unsigned char hash[20];
+
+    int i = 0;
+    while (*ptr != ' ' && ptr < data + size) {
+      if (i < 6) mode[i++] = *ptr++;
+      ptr++;
+    }
+    mode[i] = '\0';
+    if (*ptr == ' ') ptr++;
+
+    i = 0;
+    while (*ptr != '\0' && ptr < data + size) {
+      if (i < 255) name[i++] = *ptr++;
+      ptr++;
+    }
+    name[i] = '\0';
+    if (*ptr != '\0') ptr++;
+
+    if (ptr + 20 > data + size) {
+      fprintf(stderr, "Invalid tree object format\n");
+      return;
+    }
+
+    memcpy(hash, ptr, 20);
+    ptr += 20;
+
+    if (name_only) {
+      printf("%s\n", name);
+    } else {
+      // printf("%s %s\n", mode, (mode[0] == '4' ? "tree" : "blob"), name);
+      printf("%s %s %s\n", mode, (mode[0] == '4' ? "tree" : "blob"), name);
+    }
+  }
+}
+
+void ls_tree(const char *tree_file, int name_only) {
+  unsigned char *data;
+  size_t size;
+  read_git_object(tree_file, &data, &size);
+  parse_tree(data, size, name_only);
+  free(data);
 }
 

@@ -297,27 +297,33 @@ void read_git_object(const char *hash, unsigned char **data, size_t *size) {
 // Parse the tree object format
 
 void parse_tree(const unsigned char *data, size_t size, int name_only){
-  const unsigned char *ptr = data;
+  // Skip the header
+
+  const unsigned char *ptr = memchr(data, '\0', size);
+  if (!ptr) {
+    fprintf(stderr, "Invalid tree object format\n");
+    return;
+  }
   while (ptr < data + size) {
-    char mode[7];
-    char name[256];
+    char mode[8] = {0};
+    char name[256] = {0};
     unsigned char hash[20];
 
     int i = 0;
-    while (*ptr != ' ' && ptr < data + size) {
-      if (i < 6) mode[i++] = *ptr++;
+    while (ptr < data + size && *ptr != ' ') {
+      if (i < sizeof(mode) - 1) mode[i++] = *ptr;
       ptr++;
     }
     mode[i] = '\0';
     if (*ptr == ' ') ptr++;
 
     i = 0;
-    while (*ptr != '\0' && ptr < data + size) {
-      if (i < 255) name[i++] = *ptr++;
+    while (ptr < data + size && *ptr != '\0') {
+      if (i < sizeof(name) - 1) name[i++] = *ptr;
       ptr++;
     }
     name[i] = '\0';
-    if (*ptr != '\0') ptr++;
+    if (*ptr == '\0') ptr++;
 
     if (ptr + 20 > data + size) {
       fprintf(stderr, "Invalid tree object format\n");
@@ -326,13 +332,14 @@ void parse_tree(const unsigned char *data, size_t size, int name_only){
 
     memcpy(hash, ptr, 20);
     ptr += 20;
+    printf("%s\n", name);
 
-    if (name_only) {
-      printf("%s\n", name);
-    } else {
-      // printf("%s %s\n", mode, (mode[0] == '4' ? "tree" : "blob"), name);
-      printf("%s %s %s\n", mode, (mode[0] == '4' ? "tree" : "blob"), name);
-    }
+    // if (name_only) {
+    //   printf("%s\n", name);
+    // } else {
+    //   // printf("%s %s\n", mode, (mode[0] == '4' ? "tree" : "blob"), name);
+    //   printf("%s %s %s\n", mode, (mode[0] == '4' ? "tree" : "blob"), name);
+    // }
   }
 }
 

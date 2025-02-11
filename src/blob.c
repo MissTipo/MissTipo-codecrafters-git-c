@@ -439,6 +439,26 @@ sha1_t write_tree(const char *dirpath) {
     // Compute SHA-1 of tree object
     sha1_t tree_sha;
     compute_sha1((unsigned char *)tree_buffer, offset, &tree_sha);
+
+    // Construct the object path
+    char object_path[256];
+    snprintf(object_path, sizeof(object_path), "%s/%.2s/%s", OBJ_DIR, tree_sha.hash, tree_sha.hash + 2);
+    
+    
+    // Ensure directory exists
+    char object_dir[256];
+    snprintf(object_dir, sizeof(object_dir), "%s/%.2s", OBJ_DIR, tree_sha.hash);
+    mkdir(object_dir, 0755);
+
+    // Write the tree object to the object store
+    FILE *object_file = fopen(object_path, "wb");
+    if (!object_file) {
+        perror("fopen");
+        exit(1);
+    }
+    fwrite(tree_buffer, 1, offset, object_file);
+    fclose(object_file);
+    
     
     return tree_sha;
 }

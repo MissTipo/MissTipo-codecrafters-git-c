@@ -18,7 +18,7 @@ void get_file_path(char *file_path, char *object_hash) {
 char file[SHA_LEN + 1];
   file[SHA_LEN] = '\0';
 
-  // Copy the first two characters of the object hash to the file
+// Copy the first two characters of the object hash to the file
   strncpy(file, object_hash, strlen(object_hash));
   snprintf(file_path, SHA_LEN + 3 + strlen(OBJ_DIR), "%s/%.2s/%s", OBJ_DIR, object_hash, object_hash + 2);
   // snprintf(file_path, "%s/%.2s/%s", OBJ_DIR, object_hash, file + 2);
@@ -349,5 +349,97 @@ void ls_tree(const char *tree_file, int name_only) {
   read_git_object(tree_file, &data, &size);
   parse_tree(data, size, name_only);
   free(data);
+}
+
+/** Function to write a tree object to the .git/objects
+* git write-tree command creates a tree object from the current state of the stagin area
+* This function iterates over the files/dir in the staging area.
+* If the entry is a file, it creates a blob object and writes it to the object store
+* If the entry is a directory, it recursively creates a tree object and writes it to the object store
+* Once all the entries are processed, it creates a tree object and writes it to the object store
+*/
+
+// Function to compute the SHA-1 hash of a file
+
+void compute_sha1(const unsigned char *data, size_t len, sha1_t *out) {
+  EVP_MD_CTX *ctx = EVP_MD_CTX_new();
+  EVP_DigestInit_ex(ctx, EVP_sha1(), NULL);
+  EVP_DigestUpdate(ctx, data, len);
+  EVP_DigestFinal_ex(ctx, (unsigned char *)out, NULL);
+  EVP_MD_CTX_free(ctx);
+}
+
+// Function to write a blob object
+sha1_t write_blob(const char *filepath) {
+    FILE *fp = fopen(filepath, "rb");
+    if (!fp) {
+        perror("fopen");
+        exit(1);
+    }
+    
+    fseek(fp, 0, SEEK_END);
+    size_t size = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+    
+    unsigned char *buffer = malloc(size);
+    fread(buffer, 1, size, fp);
+    fclose(fp);
+    
+    // Compute SHA-1 hash of blob content
+    sha1_t sha;
+    compute_sha1(buffer, size, &sha);
+    free(buffer);
+    
+    return sha;
+}
+
+// Function to write a tree object
+sha1_t write_tree(const char *dirpath) {
+    DIR *dir = opendir(dirpath);
+    if (!dir) {
+        perror("opendir");
+        exit(1);
+    }
+    
+    struct dirent *entry;
+    char tree_buffer[8192];
+    size_t offset = 0;
+    
+    while ((entry = readdir(dir))) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0 || strcmp(entry->d_name, ".git") == 0) {
+            continue;
+        }
+        
+        char fullpath[1024];
+        snprintf(fullpath, sizeof(fullpath), "%s/%s", dirpath, entry->d_name);
+        
+        struct stat st;
+        if (stat(fullpath, &st) == -1) {
+            perror("stat");
+            continue;
+        }
+        
+        sha1_t sha;
+        char mode[7];
+        
+        if (S_ISDIR(st.st_mode)) {
+            strcpy(mode, "040000");
+            sha = write_tree(fullpath);
+        } else {
+            strcpy(mode, "100644");
+            sha = write_blob(fullpath);
+        }
+        
+        offset += snprintf(tree_buffer + offset, sizeof(tree_buffer) - offset, "%s %s\0", mode, entry->d_name);
+        memcpy(tree_buffer + offset, sha.hash, 20);
+        offset += 20;
+    }
+    closedir(dir);
+    
+    // Compute SHA-1 of tree object
+    sha1_t tree_sha;
+    compute_sha1((unsigned char *)tree_buffer, offset, &tree_sha);
+    
+    return tree_sha;
 }
 

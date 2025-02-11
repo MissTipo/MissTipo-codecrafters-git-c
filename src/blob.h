@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <dirent.h>
 #include <openssl/evp.h>
+#include <errno.h>
 
 #define SHA_LEN 100
 #define CHUNK 16384

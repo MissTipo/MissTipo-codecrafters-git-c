@@ -363,9 +363,15 @@ void ls_tree(const char *tree_file, int name_only) {
 
 void compute_sha1(const unsigned char *data, size_t len, sha1_t *out) {
   EVP_MD_CTX *ctx = EVP_MD_CTX_new();
+  if (!ctx) {
+    perror("EVP_MD_CTX_new");
+    exit(1);
+  }
   EVP_DigestInit_ex(ctx, EVP_sha1(), NULL);
   EVP_DigestUpdate(ctx, data, len);
-  EVP_DigestFinal_ex(ctx, (unsigned char *)out, NULL);
+
+  unsigned int sha_len;
+  EVP_DigestFinal_ex(ctx, (unsigned char *)out, &sha_len);
   EVP_MD_CTX_free(ctx);
 }
 
@@ -382,6 +388,11 @@ sha1_t write_blob(const char *filepath) {
     fseek(fp, 0, SEEK_SET);
     
     unsigned char *buffer = malloc(size);
+    if (!buffer) {
+        perror("malloc");
+        exit(1);
+    }
+
     fread(buffer, 1, size, fp);
     fclose(fp);
     
@@ -430,6 +441,12 @@ sha1_t write_tree(const char *dirpath) {
             sha = write_blob(fullpath);
         }
         
+        // Ensure no buffer overflow
+        if (offset + 27 >= sizeof(tree_buffer)) {
+            fprintf(stderr, "Tree buffer overflow\n");
+            exit(1);
+        }
+        
         offset += snprintf(tree_buffer + offset, sizeof(tree_buffer) - offset, "%s %s\0", mode, entry->d_name);
         memcpy(tree_buffer + offset, sha.hash, 20);
         offset += 20;
@@ -441,14 +458,16 @@ sha1_t write_tree(const char *dirpath) {
     compute_sha1((unsigned char *)tree_buffer, offset, &tree_sha);
 
     // Construct the object path
-    char object_path[256];
+    char object_path[256], object_dir[256];
+    snprintf(object_dir, sizeof(object_dir), "%s/%.2s", OBJ_DIR, tree_sha.hash);
     snprintf(object_path, sizeof(object_path), "%s/%.2s/%s", OBJ_DIR, tree_sha.hash, tree_sha.hash + 2);
     
     
     // Ensure directory exists
-    char object_dir[256];
-    snprintf(object_dir, sizeof(object_dir), "%s/%.2s", OBJ_DIR, tree_sha.hash);
-    mkdir(object_dir, 0755);
+    if (mkdir(object_dir, 0755) == -1 && errno != EEXIST) {
+        perror("mkdir");
+        exit(1);
+    }
 
     // Write the tree object to the object store
     FILE *object_file = fopen(object_path, "wb");

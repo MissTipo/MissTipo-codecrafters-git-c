@@ -20,6 +20,12 @@ typedef struct {
   unsigned char hash[20];
 } sha1_t;
 
+typedef struct {
+    char mode[7];
+    char name[256];
+    sha1_t sha;
+} tree_entry;
+
 
 /* Function prototypes */
 void get_file_path(char *file_path, char *object_hash);

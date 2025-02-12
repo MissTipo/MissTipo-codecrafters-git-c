@@ -359,8 +359,11 @@ void ls_tree(const char *tree_file, int name_only) {
 * Once all the entries are processed, it creates a tree object and writes it to the object store
 */
 
-// Function to compute the SHA-1 hash of a file
+int compare_entries(const void *a, const void *b) {
+    return strcmp(((tree_entry *)a)->name, ((tree_entry *)b)->name);
+}
 
+// Function to compute the SHA-1 hash of a file
 void compute_sha1(const unsigned char *data, size_t len, sha1_t *out) {
   EVP_MD_CTX *ctx = EVP_MD_CTX_new();
   if (!ctx) {
@@ -374,6 +377,40 @@ void compute_sha1(const unsigned char *data, size_t len, sha1_t *out) {
   EVP_DigestFinal_ex(ctx, (unsigned char *)out, &sha_len);
   EVP_MD_CTX_free(ctx);
 }
+
+void write_compressed(const char *path, const unsigned char *data, size_t size) {
+    FILE *file = fopen(path, "wb");
+    if (!file) {
+        perror("fopen");
+        exit(1);
+    }
+
+    z_stream stream = {0};
+    if (deflateInit(&stream, Z_BEST_COMPRESSION) != Z_OK) {
+        perror("deflateInit");
+        exit(1);
+    }
+
+    unsigned char compressed[4096];
+    stream.next_in = (unsigned char *)data;
+    stream.avail_in = size;
+    stream.next_out = compressed;
+    stream.avail_out = sizeof(compressed);
+
+    int ret = deflate(&stream, Z_FINISH);
+    if (ret != Z_STREAM_END) {
+        fprintf(stderr, "deflate failed: %d\n", ret);
+        exit(1);
+    }
+    size_t written = fwrite(compressed, 1, sizeof(compressed) - stream.avail_out, file);
+    if (written != sizeof(compressed) - stream.avail_out) {
+        fprintf(stderr, "failed to write to file: %s\n", path);
+        exit(1);
+    }
+    fclose(file);
+    deflateEnd(&stream);
+}
+
 
 // Function to write a blob object
 sha1_t write_blob(const char *filepath) {
@@ -395,13 +432,43 @@ sha1_t write_blob(const char *filepath) {
 
     fread(buffer, 1, size, fp);
     fclose(fp);
-    
+
+    char header[64];
+    int header_len = snprintf(header, sizeof(header), "blob %zu", size);
+
+    size_t total_len = header_len + 1 + size;
+    unsigned char *full_data = malloc(total_len);
+    memcpy(full_data, header, header_len);
+    full_data[header_len] = '\0';
+    memcpy(full_data + header_len + 1, buffer, size);
+
+    sha1_t sha;
+    compute_sha1(full_data, total_len, &sha);
+    free(buffer);
+
+    char hex_hash[41];
+    for (int i = 0; i < 20; i++) {
+        sprintf(hex_hash + 2 * i, "%02x", sha.hash[i]);
+    }
+
+    char object_dir[256], object_path[256];
+    snprintf(object_dir, sizeof(object_dir), "%s/%02x", OBJ_DIR, sha.hash[0]);
+    snprintf(object_path, sizeof(object_path), "%s/%s", object_dir, hex_hash + 2);
+    // snprintf(object_dir, sizeof(object_dir), "%s/%02x%02x", OBJ_DIR, sha.hash[0], sha.hash[1]);
+    // snprintf(object_path, sizeof(object_path), "%s/%s", object_dir, hex_hash + 2);
+
+    mkdir(object_dir, 0755);
+    write_compressed(object_path, full_data, total_len);
+
+    free(full_data);
+    return sha;
+    /**
     // Compute SHA-1 hash of blob content
     sha1_t sha;
     compute_sha1(buffer, size, &sha);
     free(buffer);
     
-    return sha;
+    return sha;*/
 }
 
 // Function to write a tree object
@@ -413,8 +480,8 @@ sha1_t write_tree(const char *dirpath) {
     }
     
     struct dirent *entry;
-    char tree_buffer[8192];
-    size_t offset = 0;
+    tree_entry entries[1024];
+    size_t entry_count = 0;
     
     while ((entry = readdir(dir))) {
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0 || strcmp(entry->d_name, ".git") == 0) {
@@ -429,56 +496,84 @@ sha1_t write_tree(const char *dirpath) {
             perror("stat");
             continue;
         }
-        
-        sha1_t sha;
-        char mode[7];
-        
-        if (S_ISDIR(st.st_mode)) {
-            strcpy(mode, "040000");
-            sha = write_tree(fullpath);
-        } else {
-            strcpy(mode, "100644");
-            sha = write_blob(fullpath);
+        if (entry_count >= 1024) {
+            fprintf(stderr, "Too many entries in directory\n");
+            exit(1);
         }
         
-        // Ensure no buffer overflow
+        // Copy the file/directory name.
+        strncpy(entries[entry_count].name, entry->d_name, sizeof(entries[entry_count].name)-1);
+        entries[entry_count].name[sizeof(entries[entry_count].name)-1] = '\0';
+        
+        // Set the mode and recursively write subtrees or blobs.
+        if (S_ISDIR(st.st_mode)) {
+            strcpy(entries[entry_count].mode, "40000");
+            entries[entry_count].sha = write_tree(fullpath);
+        } else {
+            strcpy(entries[entry_count].mode, "100644");
+            entries[entry_count].sha = write_blob(fullpath);
+        }
+        entry_count++;
+    }
+    closedir(dir);
+
+    // Sort the entries by name (as Git does).
+    qsort(entries, entry_count, sizeof(tree_entry), compare_entries);
+    
+    // Write the sorted entries into tree_buffer.
+    char tree_buffer[8192];
+    size_t offset = 0;
+    for (size_t i = 0; i < entry_count; i++) {
+        // Check for potential buffer overflow.
         if (offset + 27 >= sizeof(tree_buffer)) {
             fprintf(stderr, "Tree buffer overflow\n");
             exit(1);
         }
-        
-        offset += snprintf(tree_buffer + offset, sizeof(tree_buffer) - offset, "%s %s\0", mode, entry->d_name);
-        memcpy(tree_buffer + offset, sha.hash, 20);
+        // Write "<mode> <name>" followed by a null byte.
+        offset += snprintf(tree_buffer + offset, sizeof(tree_buffer) - offset,
+                           "%s %s", entries[i].mode, entries[i].name);
+        tree_buffer[offset++] = '\0';
+        // Append the 20-byte SHA1 hash.
+        memcpy(tree_buffer + offset, entries[i].sha.hash, 20);
         offset += 20;
     }
-    closedir(dir);
     
-    // Compute SHA-1 of tree object
+    // Build the tree object header
+    char header[64];
+    int header_len = snprintf(header, sizeof(header), "tree %zu", offset);
+    size_t total_len = header_len + 1 + offset;
+
+    // Allocate the full object data (header + null byte + tree_buffer).
+    unsigned char *full_data = malloc(total_len);
+    if (!full_data) {
+        perror("malloc");
+        exit(1);
+    }
+    memcpy(full_data, header, header_len);
+    full_data[header_len] = '\0';
+    memcpy(full_data + header_len + 1, tree_buffer, offset);
+
+    // Compute the SHA-1 hash of the tree object.
     sha1_t tree_sha;
-    compute_sha1((unsigned char *)tree_buffer, offset, &tree_sha);
+    compute_sha1(full_data, total_len, &tree_sha);
 
-    // Construct the object path
-    char object_path[256], object_dir[256];
-    snprintf(object_dir, sizeof(object_dir), "%s/%.2s", OBJ_DIR, tree_sha.hash);
-    snprintf(object_path, sizeof(object_path), "%s/%.2s/%s", OBJ_DIR, tree_sha.hash, tree_sha.hash + 2);
-    
-    
-    // Ensure directory exists
-    if (mkdir(object_dir, 0755) == -1 && errno != EEXIST) {
-        perror("mkdir");
-        exit(1);
+    // Build the hex string for the SHA1.
+    char hex_hash[41];
+    for (int i = 0; i < 20; i++) {
+        sprintf(hex_hash + 2 * i, "%02x", tree_sha.hash[i]);
     }
 
-    // Write the tree object to the object store
-    FILE *object_file = fopen(object_path, "wb");
-    if (!object_file) {
-        perror("fopen");
-        exit(1);
-    }
-    fwrite(tree_buffer, 1, offset, object_file);
-    fclose(object_file);
-    
-    
+    // Build the object directory and file paths
+    char object_dir[256], object_path[256];
+    snprintf(object_dir, sizeof(object_dir), "%s/%02x", OBJ_DIR, tree_sha.hash[0]);
+    snprintf(object_path, sizeof(object_path), "%s/%s", object_dir, hex_hash + 2);
+    // snprintf(object_dir, sizeof(object_dir), "%s/%02x%02x", OBJ_DIR, tree_sha.hash[0], tree_sha.hash[1]);
+    // snprintf(object_path, sizeof(object_path), "%s/%s", object_dir, hex_hash + 2);
+
+    mkdir(object_dir, 0755);
+    write_compressed(object_path, full_data, total_len);
+
+    free(full_data);
     return tree_sha;
 }
 

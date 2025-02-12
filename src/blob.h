@@ -15,6 +15,8 @@
 #define CHUNK 16384
 #define BUFFER_SIZE 4096
 #define OBJ_DIR ".git/objects"
+#define COMMITTER_NAME "Dorine Tipo"
+#define COMMITTER_EMAIL "dorine.a.tipo@gmail.com"
 
 typedef struct {
   unsigned char hash[20];
@@ -39,5 +41,9 @@ void ls_tree(const char *tree_file, int name_only);
 void compute_sha1(const unsigned char *data, size_t len, sha1_t *out);
 sha1_t write_tree(const char *dirpath);
 sha1_t write_blob(const char *filepath);
+void get_timestamp(char *buffer, size_t size);
+void sha1_hash(const char *data, size_t len, char *out);
+void write_commit_object(const char *content, const char *sha);
+int commit_tree(const char *tree_sha, const char *parent_sha, const char *message);
 
 #endif

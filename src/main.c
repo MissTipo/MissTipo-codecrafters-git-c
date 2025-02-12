@@ -83,6 +83,16 @@ int main(int argc, char *argv[]) {
             printf("%02x", sha.hash[i]);
         }
         printf("\n");
+
+    } else if (strcmp(command, "commit-tree") == 0) {
+        if (argc != 7 || strcmp(argv[3], "-p") != 0 || strcmp(argv[5], "-m") != 0) {
+            fprintf(stderr, "Usage: ./your_program.sh commit-tree <tree_sha> -p <commit_sha> -m <message>\n");
+            return 1;
+        }
+
+        return commit_tree(argv[2], argv[4], argv[6]);
+
+
     } else {
         fprintf(stderr, "Unknown command %s\n", command);
         return 1;

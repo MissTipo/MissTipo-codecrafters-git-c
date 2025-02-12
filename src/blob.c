@@ -41,7 +41,7 @@ int decompress_blob(FILE *file, unsigned char **blob_data, size_t *blob_size) {
   }
 
   /* Initialize the zlib stream */
-  stream.zalloc = Z_NULL;
+stream.zalloc = Z_NULL;
   stream.zfree = Z_NULL;
   stream.opaque = Z_NULL;
   stream.avail_in = 0;
@@ -575,5 +575,71 @@ sha1_t write_tree(const char *dirpath) {
 
     free(full_data);
     return tree_sha;
+}
+
+/**
+* Implement the git commit-tree command
+* This program creates a commit object and print its 40-char SHA to stdout
+* The commit object contains the timestamp, tree sha, author, committer, and parent commit sha (if any)
+*/
+
+// Get timestamp
+void get_timestamp(char *buffer, size_t size) {
+    time_t t = time(NULL);
+    struct tm *tm_info = localtime(&t);
+    strftime(buffer, size, "%s %z", tm_info);
+}
+
+// Compute the SHA-1 hash of a commit content
+void sha1_hash(const char *data, size_t len, char *out) {
+    unsigned char hash[SHA_DIGEST_LENGTH];
+    SHA1((unsigned char *)data, len, hash);
+    for (int i = 0; i < SHA_DIGEST_LENGTH; i++) {
+        sprintf(out + (i * 2), "%02x", hash[i]);
+    }
+}
+
+// Write the commit object
+void write_commit_object(const char *content, const char *sha) {
+    char dir_path[64], file_path[128];
+
+    snprintf(dir_path, sizeof(dir_path), "%s/%.2s", OBJ_DIR, sha);
+    snprintf(file_path, sizeof(file_path), "%s/%.2s/%s", OBJ_DIR, sha, sha + 2);
+
+    mkdir(OBJ_DIR, 0755);
+    mkdir(dir_path, 0755);
+
+    size_t content_len = strlen(content);
+    char *formatted_content;
+    size_t formatted_size = content_len + 10; // "commit " + size digits + null terminator
+    snprintf(formatted_content, formatted_size, "commit %zu%c%s", content_len, '\0', content);
+
+    if (!formatted_content) {
+        perror("malloc");
+        exit(1);
+    }
+
+    write_compressed(file_path, (unsigned char *)content, strlen(content));
+    free(formatted_content);
+}
+
+// Commit the tree object
+int commit_tree(const char *tree_sha, const char *parent_sha, const char *message) {
+    char timestamp[64];
+    get_timestamp(timestamp, sizeof(timestamp));
+
+    char commit_content[BUFFER_SIZE];
+    snprintf(commit_content, sizeof(commit_content),
+             "tree %s\nparent %s\nauthor %s <%s> %s\ncommitter %s <%s> %s\n\n%s\n",
+             tree_sha, parent_sha, COMMITTER_NAME, COMMITTER_EMAIL, timestamp,
+             COMMITTER_NAME, COMMITTER_EMAIL, timestamp, message);
+
+    char sha[SHA_DIGEST_LENGTH * 2 + 1] = {0};
+    sha1_hash(commit_content, strlen(commit_content), sha);
+
+    write_commit_object(commit_content, sha);
+    printf("%s\n", sha);
+
+    return 0;
 }
 

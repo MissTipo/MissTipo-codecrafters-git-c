@@ -600,47 +600,6 @@ void sha1_hash(const char *data, size_t len, char *out) {
     }
 }
 
-void write_compressed_commit(const char *path, const unsigned char *data, size_t size) {
-    FILE *file = fopen(path, "wb");
-    if (!file) {
-        perror("fopen");
-        exit(1);
-    }
-
-    z_stream stream = {0};
-    if (deflateInit(&stream, Z_BEST_COMPRESSION) != Z_OK) {
-        perror("deflateInit");
-        exit(1);
-    }
-
-    unsigned char compressed[BUFFER_SIZE];
-    stream.next_in = (unsigned char *)data;
-    stream.avail_in = size;
-
-    int ret;
-    do {
-        stream.next_out = compressed;
-        stream.avail_out = sizeof(compressed);
-
-        ret = deflate(&stream, Z_FINISH);
-        if (ret != Z_STREAM_END && ret != Z_OK && ret != Z_BUF_ERROR) {
-            fprintf(stderr, "deflate failed: %d\n", ret);
-            deflateEnd(&stream);
-            exit(1);
-        }
-
-        size_t to_write = sizeof(compressed) - stream.avail_out;
-        if (fwrite(compressed, 1, to_write, file) != to_write) {
-            fprintf(stderr, "failed to write to file: %s\n", path);
-            deflateEnd(&stream);
-            exit(1);
-        }
-    } while (stream.avail_out == 0);
-
-    deflateEnd(&stream);
-    fclose(file);
-}
-
 // Write the commit object
 void write_commit_object(const char *content, const char *sha) {
     char dir_path[64], file_path[128];

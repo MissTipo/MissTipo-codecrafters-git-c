@@ -586,8 +586,9 @@ sha1_t write_tree(const char *dirpath) {
 // Get timestamp
 void get_timestamp(char *buffer, size_t size) {
     time_t t = time(NULL);
-    struct tm *tm_info = localtime(&t);
-    strftime(buffer, size, "%s %z", tm_info);
+    struct tm tm_info;
+    localtime_r(&t, &tm_info);
+    strftime(buffer, size, "%Y-%m-%d %H:%M:%S %z", &tm_info);
 }
 
 // Compute the SHA-1 hash of a commit content
@@ -597,6 +598,47 @@ void sha1_hash(const char *data, size_t len, char *out) {
     for (int i = 0; i < SHA_DIGEST_LENGTH; i++) {
         sprintf(out + (i * 2), "%02x", hash[i]);
     }
+}
+
+void write_compressed_commit(const char *path, const unsigned char *data, size_t size) {
+    FILE *file = fopen(path, "wb");
+    if (!file) {
+        perror("fopen");
+        exit(1);
+    }
+
+    z_stream stream = {0};
+    if (deflateInit(&stream, Z_BEST_COMPRESSION) != Z_OK) {
+        perror("deflateInit");
+        exit(1);
+    }
+
+    unsigned char compressed[BUFFER_SIZE];
+    stream.next_in = (unsigned char *)data;
+    stream.avail_in = size;
+
+    int ret;
+    do {
+        stream.next_out = compressed;
+        stream.avail_out = sizeof(compressed);
+
+        ret = deflate(&stream, Z_FINISH);
+        if (ret != Z_STREAM_END && ret != Z_OK && ret != Z_BUF_ERROR) {
+            fprintf(stderr, "deflate failed: %d\n", ret);
+            deflateEnd(&stream);
+            exit(1);
+        }
+
+        size_t to_write = sizeof(compressed) - stream.avail_out;
+        if (fwrite(compressed, 1, to_write, file) != to_write) {
+            fprintf(stderr, "failed to write to file: %s\n", path);
+            deflateEnd(&stream);
+            exit(1);
+        }
+    } while (stream.avail_out == 0);
+
+    deflateEnd(&stream);
+    fclose(file);
 }
 
 // Write the commit object
@@ -610,16 +652,19 @@ void write_commit_object(const char *content, const char *sha) {
     mkdir(dir_path, 0755);
 
     size_t content_len = strlen(content);
-    char *formatted_content;
-    size_t formatted_size = content_len + 10; // "commit " + size digits + null terminator
-    snprintf(formatted_content, formatted_size, "commit %zu%c%s", content_len, '\0', content);
-
+    size_t formatted_size = content_len + 20; // "commit " + size digits + null terminator
+    char *formatted_content = malloc(formatted_size);
     if (!formatted_content) {
         perror("malloc");
         exit(1);
     }
 
-    write_compressed(file_path, (unsigned char *)content, strlen(content));
+    int total_len = snprintf(formatted_content, formatted_size, "commit %zu%c%s", content_len, '\0', content);
+    // memcpy(formatted_content + header_len, content, content_len + 1);
+
+    // write_compressed_commit(file_path, (unsigned char *)content, strlen(content));
+    write_compressed(file_path, (unsigned char *)formatted_content, total_len);
+
     free(formatted_content);
 }
 
@@ -629,10 +674,17 @@ int commit_tree(const char *tree_sha, const char *parent_sha, const char *messag
     get_timestamp(timestamp, sizeof(timestamp));
 
     char commit_content[BUFFER_SIZE];
-    snprintf(commit_content, sizeof(commit_content),
-             "tree %s\nparent %s\nauthor %s <%s> %s\ncommitter %s <%s> %s\n\n%s\n",
-             tree_sha, parent_sha, COMMITTER_NAME, COMMITTER_EMAIL, timestamp,
-             COMMITTER_NAME, COMMITTER_EMAIL, timestamp, message);
+    if (parent_sha) {
+        snprintf(commit_content, sizeof(commit_content),
+                 "tree %s\nparent %s\nauthor %s <%s> %s\ncommitter %s <%s> %s\n\n%s\n",
+                 tree_sha, parent_sha, COMMITTER_NAME, COMMITTER_EMAIL, timestamp,
+                 COMMITTER_NAME, COMMITTER_EMAIL, timestamp, message);
+    } else {
+        snprintf(commit_content, sizeof(commit_content),
+                 "tree %s\nauthor %s <%s> %s\ncommitter %s <%s> %s\n\n%s\n",
+                 tree_sha, COMMITTER_NAME, COMMITTER_EMAIL, timestamp,
+                 COMMITTER_NAME, COMMITTER_EMAIL, timestamp, message);
+    }
 
     char sha[SHA_DIGEST_LENGTH * 2 + 1] = {0};
     sha1_hash(commit_content, strlen(commit_content), sha);

@@ -91,7 +91,12 @@ int main(int argc, char *argv[]) {
         }
 
         return commit_tree(argv[2], argv[4], argv[6]);
-
+    } else if (strcmp(command, "clone") == 0) {
+        if (argc != 4) {
+            fprintf(stderr, "Usage: %s clone <repo_url> <target_dir>\n", argv[0]);
+            return 1;
+        }
+        return clone_repo(argv[2], argv[3]);
 
     } else {
         fprintf(stderr, "Unknown command %s\n", command);

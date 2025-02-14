@@ -654,3 +654,367 @@ int commit_tree(const char *tree_sha, const char *parent_sha, const char *messag
     return 0;
 }
 
+
+/**
+* Clone a repository
+* This program creates a directory and clones the given repository into it
+* It parses the URL and target directory
+* It initializes the target repository
+* Uses libcurl to get remote refs
+* Parses refs and build a request for objects.
+* POST to retrieve the packfile
+* Saves and unpacks the packfile
+* Updates the repository references
+*/
+
+// Parse command-line arguments
+
+typedef struct {
+    char remote_url[512];
+    char target_dir[256];
+} cloneArgs;
+
+cloneArgs parse_clone_args(int argc, char *argv[]) {
+    cloneArgs args = {0};
+    if (argc != 4) {
+        fprintf(stderr, "Usage: %s <remote-url> <target-dir>\n", argv[0]);
+        exit(1);
+    }
+    strncpy(args.remote_url, argv[2], sizeof(args.remote_url) - 1);
+    strncpy(args.target_dir, argv[3], sizeof(args.target_dir)-1);
+    // args.target_dir = argv[2];
+    return args;
+}
+
+// Initialize the target repository
+
+int init_repo(const char *target_dir) {
+    char cmd[512];
+    // Create the target directory:
+    if (chdir(target_dir) == -1) {
+        perror("chdir target_dir");
+        exit(1);
+    }
+
+    // Create minimal .git structure
+    if (mkdir(".git", 0755) == -1) {
+        perror("mkdir .git");
+        return -1;
+    }
+    if (mkdir(".git/objects", 0755) == -1) {
+        perror("mkdir .git/objects");
+        return -1;
+    }
+    if (mkdir(".git/refs", 0755) == -1) {
+        perror("mkdir .git/refs");
+        return -1;
+    }
+    if (mkdir(".git/refs/heads", 0755) == -1) {
+        perror("mkdir .git/refs/heads");
+        return -1;
+    }
+    // Write HEAD file
+    FILE *head = fopen(".git/HEAD", "w");
+    if (!head) {
+        perror("fopen HEAD");
+        return -1;
+    }
+    fprintf(head, "ref: refs/heads/master\n");
+    fclose(head);
+    return 0;
+}
+
+// Get remote refs using git's smart HTTP protocol
+
+struct MemoryStruct {
+    char *memory;
+    size_t size;
+};
+
+static size_t WriteMemoryCallback(void *contents, size_t size, size_t nmemb, void *userp) {
+    size_t realsize = size * nmemb;
+    struct MemoryStruct *mem = (struct MemoryStruct *)userp;
+    char *ptr = realloc(mem->memory, mem->size + realsize + 1);
+    if (ptr == NULL) {
+        fprintf(stderr, "Not enough memory (realloc returned NULL)\n");
+        return 0;
+    }
+    mem->memory = ptr;
+    memcpy(&(mem->memory[mem->size]), contents, realsize);
+    mem->size += realsize;
+    mem->memory[mem->size] = 0;
+    return realsize;
+}
+
+char *fetch_remote_refs(const char *remote_url) {
+    CURL *curl_handle;
+    CURLcode res;
+    struct MemoryStruct chunk;
+    chunk.memory = malloc(1);
+    chunk.size = 0;
+    
+    curl_global_init(CURL_GLOBAL_ALL);
+    curl_handle = curl_easy_init();
+    
+    char refs_url[1024];
+    snprintf(refs_url, sizeof(refs_url), "%s/info/refs?service=git-upload-pack", remote_url);
+    
+    curl_easy_setopt(curl_handle, CURLOPT_URL, refs_url);
+    curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
+    curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, (void *)&chunk);
+    
+    res = curl_easy_perform(curl_handle);
+    if (res != CURLE_OK) {
+        fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
+        exit(1);
+    }
+    
+    curl_easy_cleanup(curl_handle);
+    curl_global_cleanup();
+    
+    // The result in chunk.memory now holds the refs advertisement.
+    return chunk.memory;
+}
+
+// --- Parse Refs ---
+// This function looks for a line containing "HEAD" and returns a default branch.
+// If the remote only advertises "HEAD" (without a symbolic ref), we assume "master".
+
+char *parse_refs(const char *refs) {
+    char *refs_copy = strdup(refs);
+    char *saveptr;
+    char *token = strtok_r(refs_copy, "\n", &saveptr);
+    char *default_branch = NULL;
+    
+    while (token != NULL) {
+        // Skip protocol header lines.
+        if (strstr(token, "# service=") != NULL) {
+            token = strtok_r(NULL, "\n", &saveptr);
+            continue;
+        }
+        // Look for a token that contains "HEAD"
+        if (strstr(token, "HEAD") != NULL) {
+            char *space = strchr(token, ' ');
+            if (space) {
+                char *refname = space + 1;
+                // Trim any trailing whitespace
+                while (*refname && isspace((unsigned char)*refname))
+                    refname++;
+                // If the refname is "HEAD", assume default branch "master"
+                if (strcmp(refname, "HEAD") == 0) {
+                    default_branch = strdup("master");
+                } else {
+                    default_branch = strdup(refname);
+                }
+                break;
+            }
+        }
+        token = strtok_r(NULL, "\n", &saveptr);
+    }
+    free(refs_copy);
+    return default_branch;
+}
+
+// --- Extract HEAD SHA ---
+// This extracts the advertised HEAD SHA from the refs data.
+char *extract_head_sha(const char *refs) {
+    char *refs_copy = strdup(refs);
+    char *saveptr;
+    char *token = strtok_r(refs_copy, "\n", &saveptr);
+    char *sha = NULL;
+    
+    while (token != NULL) {
+        if (strstr(token, "HEAD") != NULL) {
+            // Packet-line: first 4 bytes are length.
+            // We assume the SHA is the next 40 characters.
+            if (strlen(token) >= 44) {
+                sha = strndup(token + 4, 40);
+                break;
+            }
+        }
+        token = strtok_r(NULL, "\n", &saveptr);
+    }
+    free(refs_copy);
+    return sha;
+}
+
+// --- Build Upload-pack Request ---
+// Build a minimal upload-pack request body using the HEAD SHA.
+// Build a request body with a "want" line including common capabilities.
+char *build_upload_pack_request(const char *head_sha) {
+    char line[256];
+    snprintf(line, sizeof(line),
+             "want %s multi_ack_detailed ofs-delta agent=git/2.34.1\n",
+             head_sha);
+    unsigned int line_len = (unsigned int)(strlen(line) + 4); // 4 bytes for the length header
+    char header[5];
+    snprintf(header, sizeof(header), "%04x", line_len);
+    char *request = malloc(512);
+    if (!request) {
+        perror("malloc");
+        exit(EXIT_FAILURE);
+    }
+    snprintf(request, 512, "%s%s0000", header, line);
+    return request;
+}
+
+// --- Post Upload-pack ---
+// Returns the real packfile size via out_size.
+// Sends the request and returns the packfile data and its size.
+char *post_upload_pack(const char *remote_url, const char *request_body, size_t *out_size) {
+    CURL *curl_handle;
+    CURLcode res;
+    struct MemoryStruct chunk;
+    chunk.memory = malloc(1);
+    chunk.size = 0;
+    
+    curl_global_init(CURL_GLOBAL_ALL);
+    curl_handle = curl_easy_init();
+    
+    char upload_pack_url[1024];
+    snprintf(upload_pack_url, sizeof(upload_pack_url), "%s/git-upload-pack", remote_url);
+
+    // Set the appropriate headers and disable "Expect" so the full request is sent immediately.
+    struct curl_slist *headers = NULL;
+    headers = curl_slist_append(headers, "Content-Type: application/x-git-upload-pack-request");
+    headers = curl_slist_append(headers, "Accept: application/x-git-upload-pack-result");
+    headers = curl_slist_append(headers, "Expect:");  // disable "Expect: 100-continue"
+    curl_easy_setopt(curl_handle, CURLOPT_HTTPHEADER, headers);
+    
+    curl_easy_setopt(curl_handle, CURLOPT_URL, upload_pack_url);
+    curl_easy_setopt(curl_handle, CURLOPT_POST, 1L);
+    curl_easy_setopt(curl_handle, CURLOPT_POSTFIELDS, request_body);
+    curl_easy_setopt(curl_handle, CURLOPT_POSTFIELDSIZE, (long)strlen(request_body));
+    curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
+    curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, (void *)&chunk);
+    
+    res = curl_easy_perform(curl_handle);
+    if (res != CURLE_OK) {
+        fprintf(stderr, "POST failed: %s\n", curl_easy_strerror(res));
+        exit(1);
+    }
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl_handle);
+    curl_global_cleanup();
+    
+    *out_size = chunk.size;
+    return chunk.memory;
+}
+
+// --- Save the packfile to disk and unpack it ---
+int save_and_unpack_packfile(const char *packfile_data, size_t packfile_size) {
+    system("mkdir -p .git/objects/pack");
+
+    FILE *packfile = fopen(".git/objects/pack/temp.pack", "wb");
+    if (!packfile) {
+        perror("fopen packfile");
+        return -1;
+    }
+
+    if (fwrite(packfile_data, 1, packfile_size, packfile) != packfile_size) {
+        perror("fwrite packfile");
+        fclose(packfile);
+        return -1;
+    }
+    fclose(packfile);
+
+    FILE *git_unpack = popen("git unpack-objects < .git/objects/pack/temp.pack", "r");
+    if (!git_unpack) {
+        perror("popen git unpack-objects");
+        return -1;
+    }
+
+    char output[256];
+    while (fgets(output, sizeof(output), git_unpack)) {
+        printf("%s", output);
+    }
+    pclose(git_unpack);
+    remove(".git/objects/pack/temp.pack");
+    return 0;
+}
+
+// --- Update Refs ---
+// Write the commit SHA into .git/refs/heads/<branch>
+int update_refs(const char *branch, const char *commit_sha) {
+    char ref_path[512];
+    snprintf(ref_path, sizeof(ref_path), ".git/refs/heads/%s", branch);
+    FILE *ref = fopen(ref_path, "w");
+    if (!ref) {
+        perror("fopen ref");
+        return -1;
+    }
+    fprintf(ref, "%s\n", commit_sha);
+    fclose(ref);
+    return 0;
+}
+
+int clone_repo(const char *remote_url, const char *target_dir) {
+    struct stat st;
+    if (stat(target_dir, &st) == -1) {
+        if (errno != ENOENT) {
+            perror("stat failed");
+            return -1;
+        }
+        if (mkdir(target_dir, 0755) == -1) {
+            perror("mkdir failed");
+            return -1;
+        }
+    } else if (!S_ISDIR(st.st_mode)) {
+        fprintf(stderr, "Error: %s exists but is not a directory\n", target_dir);
+        return -1;
+    }
+
+    if (init_repo(target_dir) == -1) {
+        fprintf(stderr, "Failed to initialize repository\n");
+        return -1;
+    }
+
+    char *refs = fetch_remote_refs(remote_url);
+    if (!refs) {
+        fprintf(stderr, "Failed to fetch remote refs\n");
+        return -1;
+    }
+    // printf("fetched refs:\n%s\n", refs);
+
+    char *default_branch = parse_refs(refs);
+    char *head_sha = extract_head_sha(refs);
+    free(refs);
+    if (!default_branch) {
+        fprintf(stderr, "Failed to parse default branch\n");
+        return -1;
+    }
+    if (!head_sha) {
+        fprintf(stderr, "Failed to extract HEAD SHA\n");
+        free(default_branch);
+        return -1;
+    }
+    printf("Default branch: %s\n", default_branch);
+
+    char *request = build_upload_pack_request(head_sha);
+    size_t packfile_size;
+    char *packfile = post_upload_pack(remote_url, request, &packfile_size);
+    free(request);
+    if (!packfile) {
+        fprintf(stderr, "Failed to fetch packfile\n");
+        free(default_branch);
+        return -1;
+    }
+
+    if (save_and_unpack_packfile(packfile, packfile_size) == -1) {
+        fprintf(stderr, "Failed to save and unpack packfile\n");
+        free(packfile);
+        free(default_branch);
+        return -1;
+    }
+
+    free(packfile);
+    if (update_refs(default_branch, head_sha) == -1) {
+        fprintf(stderr, "Failed to update refs\n");
+        free(default_branch);
+        return -1;
+    }
+
+    free(default_branch);
+    return 0;
+}
+

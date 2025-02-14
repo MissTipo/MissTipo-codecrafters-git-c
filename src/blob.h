@@ -10,6 +10,8 @@
 #include <dirent.h>
 #include <openssl/evp.h>
 #include <errno.h>
+#include <curl/curl.h>
+#include <ctype.h>
 
 #define SHA_LEN 100
 #define CHUNK 16384
@@ -45,5 +47,6 @@ void get_timestamp(char *buffer, size_t size);
 void sha1_hash(const char *data, size_t len, char *out);
 void write_commit_object(const char *content, const char *sha);
 int commit_tree(const char *tree_sha, const char *parent_sha, const char *message);
+int clone_repo(const char *remote_url, const char *target_dir);
 
 #endif
